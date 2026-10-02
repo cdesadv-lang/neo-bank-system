@@ -70,7 +70,7 @@ export async function issueOtp(opts: { subject: string; phone: string; purpose: 
   const provider = getOtpProvider();
   await provider.send(opts.phone, code, opts.purpose);
   // DEMO convenience only: echo the code back to the UI in local development (never in production).
-  const devCode = provider.name === "console" && process.env.DEMO_SHOW_OTP === "1" && process.env.NODE_ENV !== "production" ? code : undefined;
+  const devCode = provider.name === "console" && process.env.DEMO_SHOW_OTP === "1" && (process.env.NODE_ENV !== "production" || process.env.ALLOW_CONSOLE_OTP === "1") ? code : undefined;
   return { challengeId: ch.id, expiresAt: ch.expiresAt, devCode };
 }
 
