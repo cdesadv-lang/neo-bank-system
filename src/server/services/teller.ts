@@ -42,7 +42,7 @@ function accountRef(ref: string) {
   return iban.startsWith("EG") ? { accountNumber: iban } : { id: ref };
 }
 
-async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT" | "CASH_WITHDRAWAL", input: z.infer<typeof cashInput>, tillOwner?: StaffPrincipal) {
+async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT" | "CASH_WITHDRAWAL", input: z.infer<typeof cashInput>, tillOwner?: StaffPrincipal, postedAt?: Date) {
   const amount = toMinor(input.amount);
   if (amount <= 0n) throw Errors.validation("Amount must be positive");
   const key = `cash:${(tillOwner ?? staff).id}:${input.idempotencyKey}`;
@@ -70,7 +70,7 @@ async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT
       // merge duplicate account lines into one net debit for clarity
       const res = await postJournal(tx, {
         idempotencyKey: key, type: kind, currency: acc.currency, channel: "BRANCH", branchId: till.branchId, staffId: staff.id,
-        description: `${kind === "CASH_DEPOSIT" ? "Cash deposit" : "Cash withdrawal"} — ${acc.customer.nameEn}`, lines,
+        description: `${kind === "CASH_DEPOSIT" ? "Cash deposit" : "Cash withdrawal"} — ${acc.customer.nameEn}`, lines, postedAt,
       });
       if (!res.replayed) await audit(actor, kind, { type: "Account", id: acc.id }, undefined, { amount, till: till.code, entry: res.entry.entryNo }, tx);
       return res;
@@ -84,12 +84,13 @@ async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT
   }
 }
 
-export async function cashDeposit(staff: StaffPrincipal, actor: Actor, raw: unknown) {
+/** `opts.postedAt` is internal only (seed/batch backdating) — never taken from request bodies. */
+export async function cashDeposit(staff: StaffPrincipal, actor: Actor, raw: unknown, opts: { postedAt?: Date } = {}) {
   requirePerm(staff, "cash.deposit");
-  return postCash(staff, actor, "CASH_DEPOSIT", cashInput.parse(raw));
+  return postCash(staff, actor, "CASH_DEPOSIT", cashInput.parse(raw), undefined, opts.postedAt);
 }
 
-export async function cashWithdrawal(staff: StaffPrincipal, actor: Actor, raw: unknown) {
+export async function cashWithdrawal(staff: StaffPrincipal, actor: Actor, raw: unknown, opts: { postedAt?: Date } = {}) {
   requirePerm(staff, "cash.withdraw");
   const input = cashInput.parse(raw);
   const acc = await prisma.account.findFirst({ where: accountRef(input.accountId) });
@@ -106,7 +107,7 @@ export async function cashWithdrawal(staff: StaffPrincipal, actor: Actor, raw: u
     });
     return { pendingApproval: true, approvalId: req.id };
   }
-  return postCash(staff, actor, "CASH_WITHDRAWAL", input);
+  return postCash(staff, actor, "CASH_WITHDRAWAL", input, undefined, opts.postedAt);
 }
 
 /** Called by the approval engine: posts the withdrawal against the maker's till. */

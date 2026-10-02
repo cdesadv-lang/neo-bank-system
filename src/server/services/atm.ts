@@ -90,7 +90,8 @@ const replenishInput = z.object({
 });
 
 /** Load notes from the branch vault into cassettes: Dr ATM cash / Cr Vault cash. */
-export async function replenishAtm(staff: StaffPrincipal, actor: Actor, raw: unknown) {
+/** `opts.postedAt` is internal only (seed backdating). */
+export async function replenishAtm(staff: StaffPrincipal, actor: Actor, raw: unknown, opts: { postedAt?: Date } = {}) {
   requirePerm(staff, "atm.manage");
   const input = replenishInput.parse(raw);
   return withTx(async (tx) => {
@@ -110,7 +111,7 @@ export async function replenishAtm(staff: StaffPrincipal, actor: Actor, raw: unk
     if (input.countSessionId) await consumeCountSession(tx, input.countSessionId, staff, { expectedTotal: amount, purpose: "ATM_REPLENISH", currency: atm.currency });
     const { entry, replayed } = await postJournal(tx, {
       idempotencyKey: `atm-replenish:${atm.id}:${input.idempotencyKey}`, type: "TILL_TRANSFER", currency: atm.currency, channel: "BRANCH", branchId: atm.branchId, staffId: staff.id,
-      description: `ATM ${atm.terminalId} replenishment`, lines: [{ tillId: atm.tillId, debit: amount }, { tillId: vault.id, credit: amount }],
+      description: `ATM ${atm.terminalId} replenishment`, lines: [{ tillId: atm.tillId, debit: amount }, { tillId: vault.id, credit: amount }], postedAt: opts.postedAt,
     });
     if (replayed) return { entry, replayed };
     for (const c of input.cassettes) {
@@ -118,8 +119,8 @@ export async function replenishAtm(staff: StaffPrincipal, actor: Actor, raw: unk
     }
     const cassettes = await tx.atmCassette.findMany({ where: { atmId: atm.id } });
     const till = await tx.till.findUniqueOrThrow({ where: { id: atm.tillId } });
-    await tx.atmTerminal.update({ where: { id: atm.id }, data: { lastReplenishedAt: new Date() } });
-    await tx.atmReconciliation.create({ data: { atmId: atm.id, businessDate: dateOnly(todayStr()), kind: "REPLENISHMENT", systemBalance: till.balance, cassetteBalance: cassetteTotal(cassettes), staffId: staff.id, countSessionId: input.countSessionId, details: { loaded: input.cassettes, amount: amount.toString() } } });
+    await tx.atmTerminal.update({ where: { id: atm.id }, data: { lastReplenishedAt: opts.postedAt ?? new Date() } });
+    await tx.atmReconciliation.create({ data: { atmId: atm.id, businessDate: dateOnly(todayStr(opts.postedAt)), createdAt: opts.postedAt, kind: "REPLENISHMENT", systemBalance: till.balance, cassetteBalance: cassetteTotal(cassettes), staffId: staff.id, countSessionId: input.countSessionId, details: { loaded: input.cassettes, amount: amount.toString() } } });
     await audit(actor, "ATM_REPLENISHED", { type: "AtmTerminal", id: atm.id }, undefined, { amount, entry: entry.entryNo }, tx);
     return { entry, replayed: false, amount };
   });

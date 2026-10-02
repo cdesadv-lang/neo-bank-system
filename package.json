@@ -12,7 +12,10 @@
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "eod": "tsx scripts/run-eod.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "db:reset": "prisma migrate reset --force",
+    "db:migrate:dev": "prisma migrate dev",
+    "backup": "bash scripts/backup.sh"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
