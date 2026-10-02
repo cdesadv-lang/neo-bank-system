@@ -1,0 +1,749 @@
+// Neo Bank — Core Banking + Digital Banking shared schema
+// All money amounts are integer minor units (piastres/cents) stored as BigInt.
+// Interest accruals that need sub-minor precision use Decimal(28,8).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Currency {
+  EGP
+  USD
+  EUR
+  SAR
+}
+
+enum StaffRole {
+  SUPER_ADMIN
+  BRANCH_MANAGER
+  TELLER
+  CUSTOMER_SERVICE
+  CREDIT_OFFICER
+  CREDIT_MANAGER
+  COMPLIANCE_OFFICER
+  OPERATIONS
+  FINANCE
+  AUDITOR
+}
+
+model Branch {
+  id        String   @id @default(cuid())
+  code      String   @unique // 4 digits, used in IBAN
+  nameAr    String
+  nameEn    String
+  city      String
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  staff     Staff[]
+  customers Customer[]
+  accounts  Account[]
+  tills     Till[]
+  loans     Loan[]
+}
+
+model Staff {
+  id                String    @id @default(cuid())
+  username          String    @unique
+  email             String    @unique
+  fullNameAr        String
+  fullNameEn        String
+  passwordHash      String
+  role              StaffRole
+  branchId          String?
+  branch            Branch?   @relation(fields: [branchId], references: [id])
+  active            Boolean   @default(true)
+  totpSecret        String?
+  totpEnabled       Boolean   @default(false)
+  failedLogins      Int       @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+
+  sessions StaffSession[]
+}
+
+model StaffSession {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  staffId    String
+  staff      Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  totpPassed Boolean  @default(true)
+  ip         String?
+  userAgent  String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  CORPORATE
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RiskRating {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum CustomerStatus {
+  ACTIVE
+  BLOCKED
+  CLOSED
+}
+
+model Customer {
+  id              String         @id @default(cuid())
+  cif             String         @unique
+  type            CustomerType
+  nameAr          String
+  nameEn          String
+  nationalId      String?        @unique
+  commercialRegNo String?        @unique
+  taxId           String?
+  phone           String         @unique
+  email           String?
+  dateOfBirth     DateTime?
+  address         String?
+  occupation      String?
+  monthlyIncome   BigInt?
+  branchId        String
+  branch          Branch         @relation(fields: [branchId], references: [id])
+  kycStatus       KycStatus      @default(PENDING)
+  riskRating      RiskRating     @default(MEDIUM)
+  status          CustomerStatus @default(ACTIVE)
+  source          String         @default("BRANCH") // BRANCH | PORTAL
+  createdById     String?
+  kycApprovedById String?
+  kycApprovedAt   DateTime?
+  kycRejectReason String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  documents     KycDocument[]
+  accounts      Account[]
+  user          CustomerUser?
+  beneficiaries Beneficiary[]
+  loans         Loan[]
+  cards         Card[]
+  notifications Notification[]
+  tickets       SupportTicket[]
+  amlAlerts     AmlAlert[]
+  amlCases      AmlCase[]
+  billPayments  BillPayment[]
+}
+
+model KycDocument {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  docType      String // NATIONAL_ID | PASSPORT | COMMERCIAL_REGISTER | TAX_CARD | UTILITY_BILL | OTHER
+  docNumber    String?
+  fileName     String?
+  expiryDate   DateTime?
+  verified     Boolean   @default(false)
+  verifiedById String?
+  uploadedAt   DateTime  @default(now())
+}
+
+model CustomerUser {
+  id           String    @id @default(cuid())
+  customerId   String    @unique
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  username     String    @unique
+  passwordHash String
+  failedLogins Int       @default(0)
+  lockedUntil  DateTime?
+  lastLoginAt  DateTime?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  sessions CustomerSession[]
+}
+
+model CustomerSession {
+  id         String       @id @default(cuid())
+  tokenHash  String       @unique
+  userId     String
+  user       CustomerUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip         String?
+  userAgent  String?
+  expiresAt  DateTime
+  createdAt  DateTime     @default(now())
+  lastSeenAt DateTime     @default(now())
+}
+
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  purpose    String // LOGIN | TRANSFER | BILL_PAYMENT | ONBOARDING | BENEFICIARY
+  subject    String // customer user id or phone number
+  codeHash   String
+  payload    Json?
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([subject, purpose])
+}
+
+model RateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+}
+
+enum AccountType {
+  CURRENT
+  SAVINGS
+  TERM_DEPOSIT
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  DORMANT
+  FROZEN
+  CLOSED
+}
+
+model Account {
+  id              String        @id @default(cuid())
+  accountNumber   String        @unique // IBAN-style, e.g. EG380099000100000000000012345
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  branchId        String
+  branch          Branch        @relation(fields: [branchId], references: [id])
+  type            AccountType
+  currency        Currency
+  status          AccountStatus @default(PENDING)
+  nickname        String?
+  balance         BigInt        @default(0)
+  interestRateBps Int           @default(0) // annual rate, basis points
+  accruedInterest Decimal       @default(0) @db.Decimal(28, 8) // minor units, not yet capitalized
+  accrualPosted   BigInt        @default(0) // minor units of the accrual already booked to GL (payable)
+  lastAccrualDate DateTime?     @db.Date
+  glAccountId     String
+  glAccount       GlAccount     @relation(fields: [glAccountId], references: [id])
+  openedById      String?
+  openedAt        DateTime      @default(now())
+  activatedAt     DateTime?
+  closedAt        DateTime?
+  lastActivityAt  DateTime?
+  createdAt       DateTime      @default(now())
+
+  lines       JournalLine[]
+  cards       Card[]
+  termDeposit TermDeposit?      @relation("TdAccount")
+  snapshots   BalanceSnapshot[]
+
+  @@index([customerId])
+  @@index([branchId])
+}
+
+model BalanceSnapshot {
+  id           String   @id @default(cuid())
+  accountId    String
+  account      Account  @relation(fields: [accountId], references: [id])
+  businessDate DateTime @db.Date
+  balance      BigInt
+
+  @@unique([accountId, businessDate])
+}
+
+enum TermDepositStatus {
+  ACTIVE
+  MATURED
+  BROKEN
+}
+
+model TermDeposit {
+  id              String            @id @default(cuid())
+  accountId       String            @unique
+  account         Account           @relation("TdAccount", fields: [accountId], references: [id])
+  sourceAccountId String
+  payoutAccountId String
+  principal       BigInt
+  rateBps         Int
+  termMonths      Int
+  startDate       DateTime          @db.Date
+  maturityDate    DateTime          @db.Date
+  interestPayout  String            @default("CAPITALIZE") // CAPITALIZE | PAYOUT (monthly to payout account)
+  status          TermDepositStatus @default(ACTIVE)
+  createdAt       DateTime          @default(now())
+}
+
+enum GlType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+model GlAccount {
+  id                 String  @id @default(cuid())
+  code               String  @unique
+  nameAr             String
+  nameEn             String
+  type               GlType
+  parentCode         String?
+  isControl          Boolean @default(false) // sub-ledger controlled (customer accounts, loans, tills)
+  allowManualPosting Boolean @default(true)
+  active             Boolean @default(true)
+
+  lines    JournalLine[]
+  accounts Account[]
+}
+
+enum JournalStatus {
+  POSTED
+  REVERSED
+}
+
+model JournalEntry {
+  id                  String        @id @default(cuid())
+  entryNo             String        @unique
+  idempotencyKey      String        @unique
+  requestHash         String?
+  type                String // CASH_DEPOSIT, CASH_WITHDRAWAL, TRANSFER, EXTERNAL_TRANSFER, FEE, INTEREST_ACCRUAL, INTEREST_CAPITALIZATION, LOAN_DISBURSEMENT, LOAN_REPAYMENT, TD_OPEN, TD_MATURITY, BILL_PAYMENT, MANUAL, REVERSAL, TILL_TRANSFER, CASH_VARIANCE, CLEARING_SETTLEMENT, CAPITAL
+  description         String
+  currency            Currency
+  valueDate           DateTime      @db.Date
+  postedAt            DateTime      @default(now())
+  status              JournalStatus @default(POSTED)
+  channel             String        @default("BRANCH") // BRANCH | PORTAL | SYSTEM | API
+  branchId            String?
+  createdByStaffId    String?
+  createdByCustomerId String?
+  reversalOfId        String?       @unique
+  reversalOf          JournalEntry? @relation("Reversal", fields: [reversalOfId], references: [id])
+  reversedBy          JournalEntry? @relation("Reversal")
+  reference           String?
+  metadata            Json?
+
+  lines JournalLine[]
+
+  @@index([postedAt])
+  @@index([valueDate])
+  @@index([type])
+}
+
+model JournalLine {
+  id           String       @id @default(cuid())
+  entryId      String
+  entry        JournalEntry @relation(fields: [entryId], references: [id])
+  glAccountId  String
+  glAccount    GlAccount    @relation(fields: [glAccountId], references: [id])
+  accountId    String?
+  account      Account?     @relation(fields: [accountId], references: [id])
+  tillId       String?
+  till         Till?        @relation(fields: [tillId], references: [id])
+  loanId       String?
+  loan         Loan?        @relation(fields: [loanId], references: [id])
+  debit        BigInt       @default(0)
+  credit       BigInt       @default(0)
+  currency     Currency
+  narrative    String?
+  balanceAfter BigInt?
+
+  @@index([accountId])
+  @@index([glAccountId])
+  @@index([tillId])
+  @@index([loanId])
+  @@index([entryId])
+}
+
+enum TillKind {
+  VAULT
+  TELLER
+}
+
+enum TillStatus {
+  OPEN
+  CLOSED
+}
+
+model Till {
+  id           String     @id @default(cuid())
+  code         String     @unique
+  branchId     String
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  kind         TillKind
+  currency     Currency
+  assignedToId String?
+  status       TillStatus @default(CLOSED)
+  balance      BigInt     @default(0)
+  openedAt     DateTime?
+  createdAt    DateTime   @default(now())
+
+  lines      JournalLine[]
+  balancings TillBalancing[]
+
+  @@unique([branchId, kind, currency, assignedToId])
+}
+
+model TillBalancing {
+  id              String   @id @default(cuid())
+  tillId          String
+  till            Till     @relation(fields: [tillId], references: [id])
+  businessDate    DateTime @db.Date
+  systemBalance   BigInt
+  countedBalance  BigInt
+  variance        BigInt
+  denominations   Json?
+  staffId         String
+  varianceEntryId String?
+  createdAt       DateTime @default(now())
+}
+
+enum TransferStatus {
+  PENDING
+  COMPLETED
+  SENT_TO_CLEARING
+  SETTLED
+  FAILED
+  REJECTED
+}
+
+model Beneficiary {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name          String
+  accountNumber String
+  bankCode      String // 0099 = Neo Bank (internal)
+  bankName      String
+  isInternal    Boolean
+  createdAt     DateTime @default(now())
+
+  @@unique([customerId, accountNumber])
+}
+
+model Transfer {
+  id                    String         @id @default(cuid())
+  reference             String         @unique
+  kind                  String // OWN | INTERNAL | EXTERNAL
+  fromAccountId         String
+  toAccountId           String?
+  beneficiaryId         String?
+  toAccountNumber       String?
+  toBankCode            String?
+  toName                String?
+  amount                BigInt
+  feeAmount             BigInt         @default(0)
+  currency              Currency
+  status                TransferStatus @default(PENDING)
+  description           String?
+  channel               String
+  journalEntryId        String?
+  clearingBatchId       String?
+  clearingBatch         ClearingBatch? @relation(fields: [clearingBatchId], references: [id])
+  failureReason         String?
+  initiatedByStaffId    String?
+  initiatedByCustomerId String?
+  createdAt             DateTime       @default(now())
+}
+
+model ClearingBatch {
+  id                String     @id @default(cuid())
+  batchNo           String     @unique
+  adapter           String // MOCK_ACH (clearly a mock, no real network)
+  currency          Currency
+  status            String     @default("OPEN") // OPEN | SUBMITTED | SETTLED
+  itemCount         Int        @default(0)
+  totalAmount       BigInt     @default(0)
+  fileContent       String?
+  submittedAt       DateTime?
+  settledAt         DateTime?
+  settlementEntryId String?
+  createdAt         DateTime   @default(now())
+  transfers         Transfer[]
+}
+
+enum LoanStatus {
+  APPLIED
+  RECOMMENDED
+  APPROVED
+  REJECTED
+  DISBURSED
+  CLOSED
+  WRITTEN_OFF
+}
+
+model LoanProduct {
+  id             String   @id @default(cuid())
+  code           String   @unique
+  nameAr         String
+  nameEn         String
+  currency       Currency @default(EGP)
+  annualRateBps  Int
+  penaltyRateBps Int
+  feeBps         Int      @default(0)
+  minAmount      BigInt
+  maxAmount      BigInt
+  minTermMonths  Int
+  maxTermMonths  Int
+  active         Boolean  @default(true)
+  loans          Loan[]
+}
+
+model Loan {
+  id                    String      @id @default(cuid())
+  loanNumber            String      @unique
+  customerId            String
+  customer              Customer    @relation(fields: [customerId], references: [id])
+  productId             String
+  product               LoanProduct @relation(fields: [productId], references: [id])
+  branchId              String
+  branch                Branch      @relation(fields: [branchId], references: [id])
+  currency              Currency
+  principal             BigInt
+  annualRateBps         Int
+  termMonths            Int
+  purpose               String?
+  status                LoanStatus  @default(APPLIED)
+  disbursementAccountId String
+  repaymentAccountId    String
+  outstandingPrincipal  BigInt      @default(0)
+  daysPastDue           Int         @default(0)
+  classification        String      @default("CURRENT") // CURRENT | DPD_1_30 | DPD_31_60 | DPD_61_90 | NPL_90_PLUS
+  channel               String      @default("BRANCH")
+  appliedById           String?
+  recommendedById       String?
+  recommendedAt         DateTime?
+  approvedById          String?
+  approvedAt            DateTime?
+  rejectedById          String?
+  rejectReason          String?
+  disbursedById         String?
+  disbursedAt           DateTime?
+  firstDueDate          DateTime?   @db.Date
+  closedAt              DateTime?
+  createdAt             DateTime    @default(now())
+
+  installments LoanInstallment[]
+  lines        JournalLine[]
+}
+
+model LoanInstallment {
+  id            String    @id @default(cuid())
+  loanId        String
+  loan          Loan      @relation(fields: [loanId], references: [id])
+  seq           Int
+  dueDate       DateTime  @db.Date
+  principalDue  BigInt
+  interestDue   BigInt
+  penaltyDue    BigInt    @default(0)
+  principalPaid BigInt    @default(0)
+  interestPaid  BigInt    @default(0)
+  penaltyPaid   BigInt    @default(0)
+  status        String    @default("DUE") // DUE | PARTIAL | PAID | OVERDUE
+  paidAt        DateTime?
+
+  @@unique([loanId, seq])
+}
+
+enum CardStatus {
+  ACTIVE
+  FROZEN
+  BLOCKED
+  CANCELLED
+}
+
+model Card {
+  id            String     @id @default(cuid())
+  customerId    String
+  customer      Customer   @relation(fields: [customerId], references: [id])
+  accountId     String
+  account       Account    @relation(fields: [accountId], references: [id])
+  token         String     @unique // opaque token; no real PAN stored
+  maskedPan     String
+  last4         String
+  scheme        String     @default("VIRTUAL-DEBIT")
+  holderName    String
+  expiryMonth   Int
+  expiryYear    Int
+  status        CardStatus @default(ACTIVE)
+  dailyLimit    BigInt
+  onlineEnabled Boolean    @default(true)
+  blockReason   String?
+  createdAt     DateTime   @default(now())
+}
+
+model FeeRule {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  nameAr      String
+  nameEn      String
+  event       String // EXTERNAL_TRANSFER | CASH_WITHDRAWAL | CARD_ISSUANCE | MONTHLY_MAINTENANCE | LOAN_DISBURSEMENT | STATEMENT_REQUEST
+  currency    Currency @default(EGP)
+  fixedAmount BigInt   @default(0)
+  rateBps     Int      @default(0)
+  minAmount   BigInt   @default(0)
+  maxAmount   BigInt?
+  active      Boolean  @default(true)
+}
+
+model AmlRule {
+  id            String     @id @default(cuid())
+  code          String     @unique
+  nameAr        String
+  nameEn        String
+  kind          String // SINGLE_AMOUNT | VELOCITY_COUNT | VELOCITY_AMOUNT | HIGH_RISK_CUSTOMER
+  threshold     BigInt     @default(0) // minor units (EGP-equivalent) or count
+  windowMinutes Int        @default(0)
+  severity      String     @default("MEDIUM")
+  active        Boolean    @default(true)
+  alerts        AmlAlert[]
+}
+
+model AmlAlert {
+  id             String    @id @default(cuid())
+  alertNo        String    @unique
+  ruleId         String
+  rule           AmlRule   @relation(fields: [ruleId], references: [id])
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id])
+  accountId      String?
+  journalEntryId String?
+  amount         BigInt?
+  currency       Currency?
+  details        String
+  severity       String
+  status         String    @default("OPEN") // OPEN | IN_REVIEW | ESCALATED | CLOSED_FALSE_POSITIVE | CLOSED_SAR_FILED
+  caseId         String?
+  case           AmlCase?  @relation(fields: [caseId], references: [id])
+  createdAt      DateTime  @default(now())
+}
+
+model AmlCase {
+  id           String     @id @default(cuid())
+  caseNo       String     @unique
+  customerId   String
+  customer     Customer   @relation(fields: [customerId], references: [id])
+  status       String     @default("OPEN") // OPEN | INVESTIGATING | CLOSED
+  decision     String? // FALSE_POSITIVE | SAR_FILED | ACCOUNT_FROZEN
+  assignedToId String?
+  notes        Json       @default("[]")
+  openedById   String
+  closedAt     DateTime?
+  createdAt    DateTime   @default(now())
+  alerts       AmlAlert[]
+}
+
+model ApprovalRequest {
+  id         String    @id @default(cuid())
+  type       String // KYC_APPROVAL | ACCOUNT_STATUS | JOURNAL_REVERSAL | MANUAL_JOURNAL | LARGE_CASH | CARD_UNBLOCK | STAFF_CREATE
+  status     String    @default("PENDING") // PENDING | APPROVED | REJECTED | FAILED
+  entityType String?
+  entityId   String?
+  branchId   String?
+  summary    String
+  payload    Json
+  makerId    String
+  checkerId  String?
+  comment    String?
+  result     Json?
+  createdAt  DateTime  @default(now())
+  decidedAt  DateTime?
+
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String // STAFF | CUSTOMER | SYSTEM | ANONYMOUS
+  actorId    String?
+  actorName  String?
+  action     String
+  entityType String?
+  entityId   String?
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  titleAr    String
+  titleEn    String
+  bodyAr     String
+  bodyEn     String
+  read       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model SupportTicket {
+  id           String          @id @default(cuid())
+  ticketNo     String          @unique
+  customerId   String
+  customer     Customer        @relation(fields: [customerId], references: [id])
+  subject      String
+  category     String          @default("GENERAL")
+  status       String          @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED | CLOSED
+  priority     String          @default("NORMAL")
+  assignedToId String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  messages     TicketMessage[]
+}
+
+model TicketMessage {
+  id         String        @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorType String // CUSTOMER | STAFF
+  authorId   String
+  authorName String
+  body       String
+  createdAt  DateTime      @default(now())
+}
+
+model BillPayment {
+  id             String   @id @default(cuid())
+  reference      String   @unique
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id])
+  accountId      String
+  billerCode     String
+  billerName     String
+  billReference  String
+  amount         BigInt
+  currency       Currency
+  status         String   @default("COMPLETED")
+  journalEntryId String?
+  createdAt      DateTime @default(now())
+}
+
+model EodRun {
+  id           String    @id @default(cuid())
+  businessDate DateTime  @unique @db.Date
+  status       String // RUNNING | COMPLETED | FAILED
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  runById      String?
+  summary      Json?
+  error        String?
+}
