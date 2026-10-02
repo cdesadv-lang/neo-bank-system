@@ -3,7 +3,7 @@ import { Tx, nextSeq } from "@/lib/db";
 import { toEgpEquivalent } from "@/lib/fx";
 import { minorToString } from "@/lib/money";
 
-const AML_TYPES = ["CASH_DEPOSIT", "CASH_WITHDRAWAL", "TRANSFER", "EXTERNAL_TRANSFER", "BILL_PAYMENT"];
+const AML_TYPES = ["CASH_DEPOSIT", "CASH_WITHDRAWAL", "TRANSFER", "EXTERNAL_TRANSFER", "BILL_PAYMENT", "ATM_WITHDRAWAL", "CARD_AUTH_HOLD"];
 
 type Touched = { account: Account; debit: bigint; credit: bigint };
 
@@ -40,7 +40,7 @@ export async function evaluateAml(tx: Tx, entry: JournalEntry, touched: Touched[
       if (rule.kind === "SINGLE_AMOUNT" && egp >= rule.threshold) {
         hit = true;
         details = `Single movement ${minorToString(amount)} ${entry.currency} (≈ EGP ${minorToString(egp)}) ≥ ${minorToString(rule.threshold)}`;
-      } else if (rule.kind === "CASH_AMOUNT" && (entry.type === "CASH_DEPOSIT" || entry.type === "CASH_WITHDRAWAL") && egp >= rule.threshold) {
+      } else if (rule.kind === "CASH_AMOUNT" && (entry.type === "CASH_DEPOSIT" || entry.type === "CASH_WITHDRAWAL" || entry.type === "ATM_WITHDRAWAL") && egp >= rule.threshold) {
         hit = true;
         details = `Cash ${entry.type === "CASH_DEPOSIT" ? "deposit" : "withdrawal"} ≈ EGP ${minorToString(egp)} ≥ ${minorToString(rule.threshold)}`;
       } else if (rule.kind === "HIGH_RISK_CUSTOMER" && customer?.riskRating === "HIGH" && egp >= rule.threshold) {

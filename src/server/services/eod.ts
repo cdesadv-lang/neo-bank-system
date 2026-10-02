@@ -8,6 +8,7 @@ import { accrueInterestForDate } from "./deposits";
 import { processLoansEod } from "./loans";
 import { computeFee } from "./fees";
 import { reconcile } from "./reports";
+import { releaseExpiredHolds } from "./card-auth";
 
 /**
  * End-of-day batch for a business date. Steps are individually idempotent, so a
@@ -26,6 +27,7 @@ export async function runEod(dateStr: string, opts: { actor?: Actor; staffId?: s
   try {
     const interest = await accrueInterestForDate(date, postedAt);
     const loans = await processLoansEod(date, postedAt);
+    const releasedHolds = await releaseExpiredHolds(postedAt ?? new Date());
 
     // Monthly maintenance fee on current accounts (month end), only if funds allow.
     let maintenance = 0;
@@ -58,7 +60,7 @@ export async function runEod(dateStr: string, opts: { actor?: Actor; staffId?: s
     await prisma.balanceSnapshot.createMany({ data: accts.map((a) => ({ accountId: a.id, businessDate: date, balance: a.balance })), skipDuplicates: true });
 
     const checks = opts.skipChecks ? { ok: true, breaks: [] as string[], trialBalanceTotals: {} } : await reconcile();
-    const summary = { date: toDateStr(date), interest, loans, maintenance, dormant: dormant.length, snapshots: accts.length, checks };
+    const summary = { date: toDateStr(date), interest, loans, releasedHolds, maintenance, dormant: dormant.length, snapshots: accts.length, checks };
     const status = checks.ok ? "COMPLETED" : "FAILED";
     await prisma.eodRun.update({ where: { id: run.id }, data: { status, finishedAt: new Date(), summary: JSON.parse(JSON.stringify(summary, (_k, v) => (typeof v === "bigint" ? v.toString() : v))), error: checks.ok ? null : checks.breaks.join("; ") } });
     await audit(actor, "EOD_RUN", { type: "EodRun", id: run.id }, undefined, { status, date: dateStr });

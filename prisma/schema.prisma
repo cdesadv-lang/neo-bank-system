@@ -46,6 +46,7 @@ model Branch {
   accounts  Account[]
   tills     Till[]
   loans     Loan[]
+  atms      AtmTerminal[]
 }
 
 model Staff {
@@ -371,6 +372,7 @@ model JournalLine {
 enum TillKind {
   VAULT
   TELLER
+  ATM
 }
 
 enum TillStatus {
@@ -566,23 +568,189 @@ enum CardStatus {
 }
 
 model Card {
-  id            String     @id @default(cuid())
-  customerId    String
-  customer      Customer   @relation(fields: [customerId], references: [id])
-  accountId     String
-  account       Account    @relation(fields: [accountId], references: [id])
-  token         String     @unique // opaque token; no real PAN stored
-  maskedPan     String
-  last4         String
-  scheme        String     @default("VIRTUAL-DEBIT")
-  holderName    String
-  expiryMonth   Int
-  expiryYear    Int
-  status        CardStatus @default(ACTIVE)
-  dailyLimit    BigInt
-  onlineEnabled Boolean    @default(true)
-  blockReason   String?
-  createdAt     DateTime   @default(now())
+  id                    String     @id @default(cuid())
+  customerId            String
+  customer              Customer   @relation(fields: [customerId], references: [id])
+  accountId             String
+  account               Account    @relation(fields: [accountId], references: [id])
+  token                 String     @unique // opaque token; no real PAN stored
+  maskedPan             String
+  last4                 String
+  scheme                String     @default("VIRTUAL-DEBIT")
+  holderName            String
+  expiryMonth           Int
+  expiryYear            Int
+  status                CardStatus @default(ACTIVE)
+  dailyLimit            BigInt
+  onlineEnabled         Boolean    @default(true) // ECOM (card-not-present)
+  atmEnabled            Boolean    @default(true)
+  posEnabled            Boolean    @default(true)
+  contactlessEnabled    Boolean    @default(true)
+  internationalEnabled  Boolean    @default(false)
+  atmDailyLimit         BigInt     @default(2000000) // EGP 20,000
+  posDailyLimit         BigInt     @default(5000000)
+  ecomDailyLimit        BigInt     @default(2500000)
+  contactlessNoPinLimit BigInt     @default(60000) // EGP 600 per tap without PIN
+  pinVerificationValue  String? // produced by the HSM adapter; never a clear PIN
+  pinTries              Int        @default(0)
+  blockReason           String?
+  createdAt             DateTime   @default(now())
+
+  authorizations CardAuthorization[]
+}
+
+/// Unified card authorization across channels (ATM, POS, ECOM, CONTACTLESS).
+model CardAuthorization {
+  id                 String    @id @default(cuid())
+  idempotencyKey     String    @unique // acquirer + terminal + STAN (ISO 8583 DE 32/41/11)
+  rrn                String    @unique // DE 37
+  stan               String // DE 11
+  authCode           String? // DE 38
+  cardId             String
+  card               Card      @relation(fields: [cardId], references: [id])
+  accountId          String
+  customerId         String
+  channel            String // ATM | POS | ECOM | CONTACTLESS
+  txnType            String // PURCHASE | CASH_WITHDRAWAL | BALANCE_INQUIRY | MINI_STATEMENT
+  acquirer           String    @default("OWN") // OWN (our terminal) | NETWORK (other bank / scheme)
+  amount             BigInt
+  currency           Currency
+  feeAmount          BigInt    @default(0)
+  merchantName       String?
+  merchantId         String?
+  mcc                String?
+  merchantCountry    String?
+  terminalId         String?
+  entryMode          String? // CHIP | MAGSTRIPE | CONTACTLESS | ECOM | MANUAL
+  status             String // DECLINED | PENDING_3DS | AUTHORIZED | CAPTURED | RELEASED | REVERSED | COMPLETED | REFUNDED | PARTIALLY_REFUNDED
+  responseCode       String // ISO 8583 DE 39
+  declineReason      String?
+  capturedAmount     BigInt    @default(0)
+  refundedAmount     BigInt    @default(0)
+  holdEntryId        String?
+  captureEntryId     String?
+  releaseEntryId     String?
+  reversalEntryId    String?
+  expiresAt          DateTime?
+  threeDsChallengeId String?
+  dispensed          Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  events   CardAuthEvent[]
+  disputes CardDispute[]
+
+  @@index([cardId, createdAt])
+  @@index([status, expiresAt])
+  @@index([terminalId])
+}
+
+model CardAuthEvent {
+  id              String            @id @default(cuid())
+  authorizationId String
+  authorization   CardAuthorization @relation(fields: [authorizationId], references: [id])
+  type            String // AUTHORIZE | DECLINE | CHALLENGE | CAPTURE | RELEASE | REVERSE | REFUND | DISPUTE | CHARGEBACK
+  amount          BigInt            @default(0)
+  journalEntryId  String?
+  details         Json?
+  createdAt       DateTime          @default(now())
+}
+
+model CardDispute {
+  id                 String            @id @default(cuid())
+  disputeNo          String            @unique
+  authorizationId    String
+  authorization      CardAuthorization @relation(fields: [authorizationId], references: [id])
+  customerId         String
+  reason             String // NOT_RECOGNISED | CASH_NOT_DISPENSED | DUPLICATE | GOODS_NOT_RECEIVED | WRONG_AMOUNT | OTHER
+  description        String?
+  amount             BigInt
+  status             String            @default("OPEN") // OPEN | CHARGEBACK_RAISED | RESOLVED_CUSTOMER | RESOLVED_MERCHANT | REJECTED
+  provisionalEntryId String?
+  resolutionEntryId  String?
+  openedBy           String // CUSTOMER | STAFF
+  resolvedById       String?
+  resolvedAt         DateTime?
+  createdAt          DateTime          @default(now())
+}
+
+model AtmTerminal {
+  id                String    @id @default(cuid())
+  terminalId        String    @unique // DE 41, 8 chars
+  branchId          String
+  branch            Branch    @relation(fields: [branchId], references: [id])
+  locationAr        String
+  locationEn        String
+  model             String    @default("SIMULATED")
+  status            String    @default("ONLINE") // ONLINE | OFFLINE | OUT_OF_SERVICE | MAINTENANCE
+  tillId            String    @unique // cash position of this ATM (Till kind ATM)
+  currency          Currency  @default(EGP)
+  maxWithdrawal     BigInt    @default(1000000) // EGP 10,000 per transaction
+  lastReplenishedAt DateTime?
+  createdAt         DateTime  @default(now())
+
+  cassettes       AtmCassette[]
+  reconciliations AtmReconciliation[]
+}
+
+model AtmCassette {
+  id           String      @id @default(cuid())
+  atmId        String
+  atm          AtmTerminal @relation(fields: [atmId], references: [id])
+  position     Int
+  denomination BigInt // minor units, e.g. 20000 = EGP 200 note
+  count        Int         @default(0)
+  currency     Currency    @default(EGP)
+
+  @@unique([atmId, position])
+}
+
+model AtmReconciliation {
+  id              String      @id @default(cuid())
+  atmId           String
+  atm             AtmTerminal @relation(fields: [atmId], references: [id])
+  businessDate    DateTime    @db.Date
+  kind            String // REPLENISHMENT | EOD
+  systemBalance   BigInt
+  cassetteBalance BigInt
+  countedBalance  BigInt?
+  variance        BigInt      @default(0)
+  countSessionId  String?
+  staffId         String?
+  varianceEntryId String?
+  details         Json?
+  createdAt       DateTime    @default(now())
+}
+
+model CashCounterDevice {
+  id        String   @id @default(cuid())
+  deviceId  String   @unique
+  branchId  String
+  model     String
+  driver    String   @default("SIMULATOR") // SIMULATOR | SERIAL | USB | TCP
+  address   String? // e.g. /dev/ttyUSB0@9600 or 10.0.0.15:4001
+  status    String   @default("ONLINE")
+  createdAt DateTime @default(now())
+
+  sessions CashCountSession[]
+}
+
+model CashCountSession {
+  id                    String            @id @default(cuid())
+  deviceId              String
+  device                CashCounterDevice @relation(fields: [deviceId], references: [id])
+  staffId               String
+  tillId                String?
+  currency              Currency
+  purpose               String // DEPOSIT | WITHDRAWAL | TILL_BALANCING | VAULT | ATM_REPLENISH | ATM_EOD
+  denominations         Json // { "20000": 5, "10000": 3 } minor-unit denomination -> count
+  total                 BigInt
+  noteCount             Int
+  suspectedCounterfeits Int               @default(0)
+  serials               Json?
+  usedRef               String?
+  usedAt                DateTime?
+  createdAt             DateTime          @default(now())
 }
 
 model FeeRule {

@@ -9,7 +9,8 @@ export const PERMISSIONS = [
   "transfer.create", "clearing.manage",
   "loan.read", "loan.apply", "loan.recommend", "loan.approve", "loan.disburse", "loan.repay",
   "deposit.open",
-  "card.read", "card.manage",
+  "card.read", "card.manage", "card.dispute",
+  "atm.read", "atm.manage",
   "fee.manage",
   "aml.read", "aml.manage",
   "gl.read", "journal.read", "journal.manual", "journal.reverse",
@@ -28,13 +29,14 @@ export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   BRANCH_MANAGER: [
     "dashboard.read", "customer.read", "customer.create", "customer.update", "kyc.approve",
     "account.read", "account.open", "account.status", "cash.deposit", "cash.withdraw", "till.read", "till.operate", "till.manage",
-    "transfer.create", "loan.read", "loan.apply", "loan.repay", "deposit.open", "card.read", "card.manage",
+    "transfer.create", "loan.read", "loan.apply", "loan.repay", "deposit.open", "card.read", "card.manage", "card.dispute", "atm.read", "atm.manage",
     "report.read", "approval.read", "approval.decide", "staff.read", "ticket.read", "ticket.manage", "journal.read",
   ],
-  TELLER: ["dashboard.read", "customer.read", "account.read", "cash.deposit", "cash.withdraw", "till.read", "till.operate", "transfer.create", "loan.repay"],
+  TELLER: ["dashboard.read", "customer.read", "account.read", "cash.deposit", "cash.withdraw", "till.read", "till.operate", "transfer.create", "loan.repay", "atm.read"],
   CUSTOMER_SERVICE: [
     "dashboard.read", "customer.read", "customer.create", "customer.update", "account.read", "account.open", "account.status",
-    "card.read", "card.manage", "deposit.open", "loan.read", "loan.apply", "ticket.read", "ticket.manage", "approval.read",
+    "card.read", "card.manage", "card.dispute",
+  "atm.read", "atm.manage", "deposit.open", "loan.read", "loan.apply", "ticket.read", "ticket.manage", "approval.read",
   ],
   CREDIT_OFFICER: ["dashboard.read", "customer.read", "account.read", "loan.read", "loan.apply", "loan.recommend", "loan.repay", "report.read"],
   CREDIT_MANAGER: ["dashboard.read", "customer.read", "account.read", "loan.read", "loan.approve", "loan.disburse", "report.read"],
@@ -44,7 +46,8 @@ export const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {
   ],
   OPERATIONS: [
     "dashboard.read", "customer.read", "account.read", "account.status", "transfer.create", "clearing.manage", "eod.run",
-    "card.read", "card.manage", "approval.read", "approval.decide", "report.read", "journal.read", "till.read", "ticket.read", "ticket.manage",
+    "card.read", "card.manage", "card.dispute",
+  "atm.read", "atm.manage", "approval.read", "approval.decide", "report.read", "journal.read", "till.read", "ticket.read", "ticket.manage",
   ],
   FINANCE: [
     "dashboard.read", "gl.read", "journal.read", "journal.manual", "journal.reverse", "report.read", "fee.manage",

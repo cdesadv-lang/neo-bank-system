@@ -61,26 +61,53 @@ export async function issueCard(staff: StaffPrincipal, actor: Actor, raw: unknow
 
 const MAX_DAILY_LIMIT = 10_000_000n; // EGP 100,000
 
-/** Customer self-service: freeze/unfreeze + limits. A BLOCKED card can't be unfrozen by the customer. */
+/** Customer self-service: freeze/unfreeze, per-channel toggles and limits, PIN set. A BLOCKED card can't be unfrozen by the customer. */
+export const cardSettingsInput = z.object({
+  action: z.enum(["FREEZE", "UNFREEZE", "SETTINGS", "SET_PIN"]),
+  atmEnabled: z.boolean().optional(),
+  posEnabled: z.boolean().optional(),
+  onlineEnabled: z.boolean().optional(),
+  contactlessEnabled: z.boolean().optional(),
+  internationalEnabled: z.boolean().optional(),
+  dailyLimit: z.string().optional(),
+  atmDailyLimit: z.string().optional(),
+  posDailyLimit: z.string().optional(),
+  ecomDailyLimit: z.string().optional(),
+  contactlessNoPinLimit: z.string().optional(),
+  pin: z.string().regex(/^\d{4}$/).optional(),
+});
+const LIMIT_CAPS: Record<string, bigint> = { dailyLimit: MAX_DAILY_LIMIT, atmDailyLimit: 3_000_000n, posDailyLimit: MAX_DAILY_LIMIT, ecomDailyLimit: 5_000_000n, contactlessNoPinLimit: 100_000n };
+
 export async function customerUpdateCard(customerId: string, actor: Actor, cardId: string, raw: unknown) {
-  const input = z.object({ action: z.enum(["FREEZE", "UNFREEZE", "LIMITS"]), dailyLimit: z.string().optional(), onlineEnabled: z.boolean().optional() }).parse(raw);
+  const input = cardSettingsInput.parse(raw);
   const card = await prisma.card.findUnique({ where: { id: cardId } });
   if (!card || card.customerId !== customerId) throw Errors.notFound("Card");
   if (card.status === "BLOCKED" || card.status === "CANCELLED") throw new AppError("CARD_BLOCKED", 422, "Card is blocked; contact the bank");
+  if (input.action === "SET_PIN") {
+    if (!input.pin || /^(\d)\1{3}$/.test(input.pin) || ["1234", "4321", "0000"].includes(input.pin)) throw Errors.validation("Choose a less predictable 4-digit PIN");
+    const { getHsm } = await import("@/server/cards/hsm");
+    // The PIN is encrypted into a PIN block immediately and only the HSM-derived PVV is stored.
+    const hsm = getHsm();
+    await prisma.card.update({ where: { id: cardId }, data: { pinVerificationValue: hsm.generatePvv(card.token, hsm.encryptPinBlock(input.pin, card.token)), pinTries: 0 } });
+    await audit(actor, "CARD_PIN_SET", { type: "Card", id: cardId });
+    return { ok: true };
+  }
   const data: Record<string, unknown> = {};
   if (input.action === "FREEZE") data.status = "FROZEN";
   if (input.action === "UNFREEZE") data.status = "ACTIVE";
-  if (input.action === "LIMITS") {
-    if (input.dailyLimit) {
-      const v = toMinor(input.dailyLimit);
-      if (v > MAX_DAILY_LIMIT) throw Errors.validation("Daily limit exceeds the maximum of 100,000.00");
-      data.dailyLimit = v;
+  if (input.action === "SETTINGS") {
+    for (const k of ["atmEnabled", "posEnabled", "onlineEnabled", "contactlessEnabled", "internationalEnabled"] as const) if (input[k] !== undefined) data[k] = input[k];
+    for (const k of ["dailyLimit", "atmDailyLimit", "posDailyLimit", "ecomDailyLimit", "contactlessNoPinLimit"] as const) {
+      if (input[k] === undefined) continue;
+      const v = toMinor(input[k]!);
+      if (v > LIMIT_CAPS[k]) throw Errors.validation(`${k} exceeds the maximum allowed`);
+      data[k] = v;
     }
-    if (input.onlineEnabled !== undefined) data.onlineEnabled = input.onlineEnabled;
   }
+  const pick = (c: typeof card) => ({ status: c.status, dailyLimit: c.dailyLimit, atm: c.atmEnabled, pos: c.posEnabled, ecom: c.onlineEnabled, contactless: c.contactlessEnabled, intl: c.internationalEnabled, atmLimit: c.atmDailyLimit, posLimit: c.posDailyLimit, ecomLimit: c.ecomDailyLimit });
   const after = await prisma.card.update({ where: { id: cardId }, data });
-  await audit(actor, `CARD_${input.action}`, { type: "Card", id: cardId }, { status: card.status, dailyLimit: card.dailyLimit, onlineEnabled: card.onlineEnabled }, { status: after.status, dailyLimit: after.dailyLimit, onlineEnabled: after.onlineEnabled });
-  return after;
+  await audit(actor, `CARD_${input.action}`, { type: "Card", id: cardId }, pick(card), pick(after));
+  return { ...after, token: undefined, pinVerificationValue: undefined };
 }
 
 /** Staff: block immediately (e.g. fraud); unblocking needs maker-checker. */

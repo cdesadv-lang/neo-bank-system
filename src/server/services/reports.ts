@@ -1,7 +1,7 @@
 import type { Currency } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { toEgpEquivalent } from "@/lib/fx";
-import { addDays, dateOnly, todayStr } from "@/lib/dates";
+import { addDays, dateOnly, todayStr, cairoDayStart as cairoStartOfDay } from "@/lib/dates";
 import { GL, isDebitNormal } from "@/server/gl";
 import { branchWhere, requirePerm, type StaffPrincipal } from "@/server/rbac";
 
@@ -84,7 +84,7 @@ export async function reconcile() {
   }
   const tillSums = await prisma.till.groupBy({ by: ["kind", "currency"], _sum: { balance: true } });
   for (const s of tillSums) {
-    const g = get(s.kind === "VAULT" ? GL.CASH_VAULT : GL.CASH_TILLS, s.currency);
+    const g = get(s.kind === "VAULT" ? GL.CASH_VAULT : s.kind === "ATM" ? GL.CASH_ATM : GL.CASH_TILLS, s.currency);
     if (g.dr - g.cr !== (s._sum.balance ?? 0n)) breaks.push(`Cash GL ${s.kind} ${s.currency}: ${g.dr - g.cr} vs tills ${s._sum.balance}`);
   }
   const loanSums = await prisma.loan.groupBy({ by: ["currency"], _sum: { outstandingPrincipal: true } });
@@ -191,4 +191,31 @@ export async function dashboard(staff: StaffPrincipal) {
     customers, pendingKyc, accounts, depositsEgpEq, loanOutstanding, nplRatioBps: loanOutstanding > 0n ? Number((npl * 10000n) / loanOutstanding) : 0,
     approvals, openAlerts, openTickets, depositSums, loans, daily: daily.map((d) => ({ date: d.d.toISOString().slice(0, 10), count: Number(d.cnt), volume: BigInt(d.vol) })),
   };
+}
+
+export async function atmReport(staff: StaffPrincipal) {
+  requirePerm(staff, "atm.read");
+  const bw = branchWhere(staff);
+  const atms = await prisma.atmTerminal.findMany({ where: bw, include: { cassettes: true, branch: true } });
+  const tills = await prisma.till.findMany({ where: { id: { in: atms.map((a) => a.tillId) } } });
+  const since = cairoStartOfDay();
+  const tx = await prisma.cardAuthorization.groupBy({ by: ["terminalId", "status", "responseCode"], where: { channel: "ATM", createdAt: { gte: since }, terminalId: { in: atms.map((a) => a.terminalId) } }, _count: true, _sum: { amount: true } });
+  return {
+    atms: atms.map((a) => ({
+      terminalId: a.terminalId, branch: a.branch.nameEn, location: a.locationEn, locationAr: a.locationAr, status: a.status,
+      ledgerCash: tills.find((t) => t.id === a.tillId)?.balance ?? 0n,
+      cassetteCash: a.cassettes.reduce((s, c) => s + c.denomination * BigInt(c.count), 0n),
+      cassettes: a.cassettes.sort((x, y) => x.position - y.position).map((c) => ({ position: c.position, denomination: c.denomination, count: c.count })),
+    })),
+    today: tx,
+  };
+}
+
+export async function cardActivity(staff: StaffPrincipal) {
+  requirePerm(staff, "card.read");
+  const since = cairoStartOfDay();
+  const byChannel = await prisma.cardAuthorization.groupBy({ by: ["channel", "status"], where: { createdAt: { gte: addDays(since, -30) } }, _count: true, _sum: { amount: true } });
+  const recent = await prisma.cardAuthorization.findMany({ where: { card: { account: branchWhere(staff) } }, orderBy: { createdAt: "desc" }, take: 100, include: { card: { select: { maskedPan: true, customer: { select: { nameEn: true, nameAr: true } } } } } });
+  const openHolds = await prisma.cardAuthorization.aggregate({ where: { status: "AUTHORIZED" }, _sum: { amount: true }, _count: true });
+  return { byChannel, recent, openHolds };
 }

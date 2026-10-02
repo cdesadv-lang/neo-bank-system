@@ -40,7 +40,7 @@ export type PostInput = {
 
 export type PostResult = { entry: JournalEntry; replayed: boolean };
 
-const AML_TYPES = new Set(["CASH_DEPOSIT", "CASH_WITHDRAWAL", "TRANSFER", "EXTERNAL_TRANSFER", "BILL_PAYMENT"]);
+const AML_TYPES = new Set(["CASH_DEPOSIT", "CASH_WITHDRAWAL", "TRANSFER", "EXTERNAL_TRANSFER", "BILL_PAYMENT", "ATM_WITHDRAWAL", "CARD_AUTH_HOLD"]);
 
 export function hashRequest(input: PostInput): string {
   const canon = JSON.stringify({
@@ -147,7 +147,7 @@ export async function postJournal(tx: Tx, input: PostInput): Promise<PostResult>
       const nb = (newTill.get(t.id) ?? 0n) + d - c; // asset: debit increases
       if (nb < 0n) throw new AppError("TILL_INSUFFICIENT_CASH", 422, `Not enough cash in ${t.code}`);
       newTill.set(t.id, nb);
-      glId = glByCode.get(t.kind === "VAULT" ? GL.CASH_VAULT : GL.CASH_TILLS)!.id;
+      glId = glByCode.get(t.kind === "VAULT" ? GL.CASH_VAULT : t.kind === "ATM" ? GL.CASH_ATM : GL.CASH_TILLS)!.id;
       balanceAfter = nb;
     } else if (l.loanId) {
       const ln = loanById.get(l.loanId);

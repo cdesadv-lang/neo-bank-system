@@ -19,6 +19,7 @@ export async function ensureReferenceData(db: Db) {
     { code: "CASH_WD_OVER_LIMIT", nameAr: "عمولة سحب نقدي كبير", nameEn: "Large cash withdrawal fee", event: "CASH_WITHDRAWAL", fixedAmount: 0n, rateBps: 5, minAmount: 0n, maxAmount: 20000n },
     { code: "CARD_ISSUE", nameAr: "رسوم إصدار بطاقة افتراضية", nameEn: "Virtual card issuance fee", event: "CARD_ISSUANCE", fixedAmount: 2500n, rateBps: 0, minAmount: 0n, maxAmount: null },
     { code: "MONTHLY_MAINT", nameAr: "مصاريف إدارة حساب شهرية", nameEn: "Monthly account maintenance", event: "MONTHLY_MAINTENANCE", fixedAmount: 1000n, rateBps: 0, minAmount: 0n, maxAmount: null },
+    { code: "ATM_NETWORK", nameAr: "رسوم سحب من صراف بنك آخر", nameEn: "Other-bank ATM withdrawal fee", event: "ATM_NETWORK_WITHDRAWAL", fixedAmount: 500n, rateBps: 0, minAmount: 0n, maxAmount: null },
     { code: "LOAN_ADMIN", nameAr: "مصاريف إدارية للقرض", nameEn: "Loan administration fee", event: "LOAN_DISBURSEMENT", fixedAmount: 0n, rateBps: 100, minAmount: 10000n, maxAmount: 500000n },
   ];
   for (const f of fees) {

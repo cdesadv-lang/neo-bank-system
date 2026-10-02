@@ -36,3 +36,12 @@ export function daysBetween(a: Date, b: Date): number {
 export function isLastDayOfMonth(d: Date): boolean {
   return addDays(d, 1).getUTCDate() === 1;
 }
+
+/** UTC instant of 00:00 local time in Africa/Cairo for the given moment (DST-aware). */
+export function cairoDayStart(now = new Date()): Date {
+  const day = todayStr(now);
+  const off = new Intl.DateTimeFormat("en-US", { timeZone: TZ, timeZoneName: "longOffset" }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value ?? "GMT+02:00";
+  const m = off.match(/GMT([+-])(\d{2}):?(\d{2})?/);
+  const sign = m?.[1] === "-" ? "-" : "+";
+  return new Date(`${day}T00:00:00${sign}${m?.[2] ?? "02"}:${m?.[3] ?? "00"}`);
+}

@@ -11,6 +11,7 @@ import { postJournal, type LineInput } from "@/server/ledger";
 import { assertBranchAccess, branchWhere, requirePerm, type StaffPrincipal } from "@/server/rbac";
 import { createApproval } from "./approval-request";
 import { computeFee } from "./fees";
+import { consumeCountSession } from "./cash-count";
 
 /** Cash withdrawals at or above this EGP-equivalent need a branch manager (maker-checker). */
 export const LARGE_CASH_THRESHOLD = 25_000_000n; // EGP 250,000.00
@@ -30,6 +31,7 @@ async function myOpenTill(tx: Tx, staff: StaffPrincipal, currency: Currency) {
 const cashInput = z.object({
   accountId: z.string(),
   amount: z.string(),
+  countSessionId: z.string().optional(), // cash-counter result bound to this operation
   narrative: z.string().max(140).optional(),
   idempotencyKey: z.string().min(8).max(100),
 });
@@ -45,6 +47,11 @@ async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT
       assertBranchAccess(tillOwner ?? staff, acc.branchId);
       if (acc.type === "TERM_DEPOSIT") throw new AppError("NOT_ALLOWED", 422, "Cash operations are not allowed on term deposits");
       const till = await myOpenTill(tx, tillOwner ?? staff, acc.currency);
+      if (input.countSessionId) {
+        const prior = await tx.journalEntry.findUnique({ where: { idempotencyKey: key } });
+        if (prior) return { entry: prior, replayed: true };
+        await consumeCountSession(tx, input.countSessionId, tillOwner ?? staff, { expectedTotal: amount, purpose: kind === "CASH_DEPOSIT" ? "DEPOSIT" : "WITHDRAWAL", currency: acc.currency, ref: key });
+      }
       if (till.branchId !== acc.branchId && (tillOwner ?? staff).branchId !== till.branchId) throw Errors.forbidden();
       const lines: LineInput[] =
         kind === "CASH_DEPOSIT"
@@ -142,13 +149,13 @@ export async function moveCash(staff: StaffPrincipal, actor: Actor, raw: unknown
   });
 }
 
-const balanceInput = z.object({ tillId: z.string(), counted: z.string(), denominations: z.record(z.string(), z.number()).optional() });
+const balanceInput = z.object({ tillId: z.string(), counted: z.string().optional(), countSessionId: z.string().optional(), denominations: z.record(z.string(), z.number()).optional() });
 
 /** End-of-day till balancing: compare counted cash to system balance, book variance to Cash Over/Short, close till. */
 export async function balanceTill(staff: StaffPrincipal, actor: Actor, raw: unknown) {
   requirePerm(staff, "till.operate");
   const input = balanceInput.parse(raw);
-  const counted = toMinor(input.counted);
+  if (!input.counted && !input.countSessionId) throw Errors.validation("Provide counted amount or a cash-counter session");
   return withTx(async (tx) => {
     await tx.$queryRaw`SELECT id FROM "Till" WHERE id = ${input.tillId} FOR UPDATE`;
     const till = await tx.till.findUnique({ where: { id: input.tillId } });
@@ -156,6 +163,14 @@ export async function balanceTill(staff: StaffPrincipal, actor: Actor, raw: unkn
     assertBranchAccess(staff, till.branchId);
     if (till.kind === "TELLER" && till.assignedToId !== staff.id && !["BRANCH_MANAGER", "SUPER_ADMIN"].includes(staff.role)) throw Errors.forbidden("Not your till");
     if (till.status !== "OPEN") throw new AppError("TILL_CLOSED", 422, "Till is not open");
+    let counted: bigint;
+    let denominations = input.denominations;
+    if (input.countSessionId) {
+      const s = await consumeCountSession(tx, input.countSessionId, staff, { purpose: "TILL_BALANCING", currency: till.currency, ref: `balancing:${till.id}` });
+      counted = s.total;
+      denominations = s.denominations as Record<string, number>;
+      if (input.counted && toMinor(input.counted) !== counted) throw Errors.validation("Manual amount differs from device count");
+    } else counted = toMinor(input.counted!);
     const variance = counted - till.balance;
     const date = todayStr();
     let varianceEntryId: string | undefined;
@@ -171,7 +186,7 @@ export async function balanceTill(staff: StaffPrincipal, actor: Actor, raw: unkn
       varianceEntryId = entry.id;
     }
     const rec = await tx.tillBalancing.create({
-      data: { tillId: till.id, businessDate: dateOnly(date), systemBalance: till.balance, countedBalance: counted, variance, denominations: input.denominations, staffId: staff.id, varianceEntryId },
+      data: { tillId: till.id, businessDate: dateOnly(date), systemBalance: till.balance, countedBalance: counted, variance, denominations, staffId: staff.id, varianceEntryId },
     });
     if (till.kind === "TELLER") await tx.till.update({ where: { id: till.id }, data: { status: "CLOSED" } });
     await audit(actor, "TILL_BALANCED", { type: "Till", id: till.id }, { balance: till.balance }, { counted, variance }, tx);
