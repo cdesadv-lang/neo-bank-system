@@ -14,7 +14,7 @@ export default async function PortalLogin() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-xl font-bold">{t("نيو بنك أونلاين", "Neo Bank Online")}</h1>
-          <span className="rounded bg-sky-900 p-0.5"><LangToggle lang={lang} /></span>
+          <span className="rounded bg-sky-900 p-0.5 text-white"><LangToggle lang={lang} /></span>
         </div>
         <PortalLoginForm t={{ username: t("اسم المستخدم", "Username"), password: t("كلمة المرور", "Password"), next: t("متابعة", "Continue"), otpSent: t("أرسلنا رمز تحقق إلى", "We sent a verification code to"), code: t("رمز التحقق", "Verification code"), login: t("دخول", "Sign in") }} />
         <p className="mt-4 text-center text-sm"><Link href="/portal/onboarding" className="text-sky-700 hover:underline">{t("عميل جديد؟ افتح حسابك رقمياً", "New customer? Open an account online")}</Link></p>

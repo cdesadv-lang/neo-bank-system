@@ -15,7 +15,7 @@ export default async function PortalHome() {
   const label: Record<string, [string, string]> = { CURRENT: ["حساب جاري", "Current account"], SAVINGS: ["حساب توفير", "Savings account"], TERM_DEPOSIT: ["وديعة لأجل", "Term deposit"] };
   return (
     <div className="space-y-5">
-      <PageTitle title={`${t("مرحباً", "Welcome")}، ${tr(lang, customer.nameAr, customer.nameEn)}`} subtitle={`CIF ${customer.cif}`} actions={<AutoRefresh seconds={10} label={t("تحديث تلقائي", "Live")} />} />
+      <PageTitle title={`${t("مرحباً، ", "Welcome, ")}${tr(lang, customer.nameAr, customer.nameEn)}`} subtitle={`CIF ${customer.cif}`} actions={<AutoRefresh seconds={10} label={t("تحديث تلقائي", "Live")} />} />
       <div className="grid gap-4 md:grid-cols-3">
         {accounts.map((a) => (
           <A key={a.id} href={`/portal/accounts/${a.id}`}>

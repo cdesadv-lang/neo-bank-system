@@ -60,6 +60,27 @@ export default async function PortalCards() {
         </Card>
       ))}
       <Card title={t("عمليات البطاقات", "Card transactions")}>
+        <ul className="divide-y divide-slate-100 sm:hidden">
+          {txns.length === 0 && <li className="py-6 text-center text-sm text-slate-400">{t("لا توجد عمليات", "No transactions")}</li>}
+          {txns.map((a) => (
+            <li key={a.id} className="py-2 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-slate-800">{a.merchantName ?? a.terminalId ?? "—"}{a.merchantCountry && a.merchantCountry !== "EG" ? ` (${a.merchantCountry})` : ""}</div>
+                  <div className="text-xs text-slate-500">{chLabel[a.channel] ?? a.channel} · {dt(a.createdAt)}</div>
+                </div>
+                <div className="shrink-0 text-end">
+                  <div className="font-semibold"><Ltr>{money(a.amount, a.currency)}</Ltr></div>
+                  <Badge v={a.status} lang={lang} />
+                </div>
+              </div>
+              {a.declineReason && <div className="mt-0.5 text-xs text-slate-500">{a.declineReason}</div>}
+              {a.refundedAmount > 0n && <div className="mt-0.5 text-xs text-sky-700">{t("مسترد", "refunded")} <Ltr>{money(a.refundedAmount, a.currency)}</Ltr></div>}
+              {a.disputes.length > 0 && <div className="mt-0.5 text-xs">{a.disputes.map((d) => `${d.disputeNo} ${d.status}`).join(", ")}</div>}
+            </li>
+          ))}
+        </ul>
+        <div className="hidden sm:block">
         <Table rows={txns} empty={t("لا توجد عمليات", "No transactions")} cols={[
           { h: t("الوقت", "Time"), c: (a) => <span className="whitespace-nowrap">{dt(a.createdAt)}</span> }, { h: t("القناة", "Channel"), c: (a) => chLabel[a.channel] ?? a.channel },
           { h: t("التاجر / الجهاز", "Merchant / ATM"), c: (a) => <span>{a.merchantName ?? a.terminalId ?? "—"}{a.merchantCountry && a.merchantCountry !== "EG" ? ` (${a.merchantCountry})` : ""}</span> },
@@ -69,6 +90,7 @@ export default async function PortalCards() {
             <ActionButton tone="ghost" endpoint="/api/portal/cards/disputes" body={{ authorizationId: a.id, reason: a.channel === "ATM" ? "CASH_NOT_DISPENSED" : "NOT_RECOGNISED" }} prompt={{ field: "description", label: t("صف المشكلة", "Describe the problem") }} label={a.channel === "ATM" ? t("لم أستلم النقدية", "Cash not received") : t("اعتراض", "Dispute")} />
           ) : null },
         ]} />
+        </div>
       </Card>
     </div>
   );
