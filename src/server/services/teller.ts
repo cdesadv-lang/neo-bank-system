@@ -36,13 +36,19 @@ const cashInput = z.object({
   idempotencyKey: z.string().min(8).max(100),
 });
 
+/** Tellers may key in the IBAN instead of the internal id. */
+function accountRef(ref: string) {
+  const iban = ref.replace(/\s+/g, "").toUpperCase();
+  return iban.startsWith("EG") ? { accountNumber: iban } : { id: ref };
+}
+
 async function postCash(staff: StaffPrincipal, actor: Actor, kind: "CASH_DEPOSIT" | "CASH_WITHDRAWAL", input: z.infer<typeof cashInput>, tillOwner?: StaffPrincipal) {
   const amount = toMinor(input.amount);
   if (amount <= 0n) throw Errors.validation("Amount must be positive");
   const key = `cash:${(tillOwner ?? staff).id}:${input.idempotencyKey}`;
   try {
     return await withTx(async (tx) => {
-      const acc = await tx.account.findUnique({ where: { id: input.accountId }, include: { customer: true } });
+      const acc = await tx.account.findFirst({ where: accountRef(input.accountId), include: { customer: true } });
       if (!acc) throw Errors.notFound("Account");
       assertBranchAccess(tillOwner ?? staff, acc.branchId);
       if (acc.type === "TERM_DEPOSIT") throw new AppError("NOT_ALLOWED", 422, "Cash operations are not allowed on term deposits");
@@ -86,9 +92,10 @@ export async function cashDeposit(staff: StaffPrincipal, actor: Actor, raw: unkn
 export async function cashWithdrawal(staff: StaffPrincipal, actor: Actor, raw: unknown) {
   requirePerm(staff, "cash.withdraw");
   const input = cashInput.parse(raw);
-  const acc = await prisma.account.findUnique({ where: { id: input.accountId } });
+  const acc = await prisma.account.findFirst({ where: accountRef(input.accountId) });
   if (!acc) throw Errors.notFound("Account");
   assertBranchAccess(staff, acc.branchId);
+  input.accountId = acc.id;
   const amount = toMinor(input.amount);
   if (toEgpEquivalent(amount, acc.currency) >= LARGE_CASH_THRESHOLD) {
     const req = await createApproval(prisma, actor, {

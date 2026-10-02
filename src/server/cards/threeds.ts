@@ -8,7 +8,7 @@ import { issueOtp, verifyOtp } from "@/server/auth/otp";
 export interface ThreeDsAdapter {
   name: string;
   isMock: boolean;
-  challenge(input: { cardId: string; phone: string; merchantName: string; amount: string; currency: string }): Promise<{ challengeId: string }>;
+  challenge(input: { cardId: string; phone: string; merchantName: string; amount: string; currency: string }): Promise<{ challengeId: string; devCode?: string }>;
   verify(cardId: string, challengeId: string, code: string): Promise<boolean>;
 }
 
@@ -17,7 +17,7 @@ export const MockThreeDs: ThreeDsAdapter = {
   isMock: true,
   async challenge({ cardId, phone, merchantName, amount, currency }) {
     const r = await issueOtp({ subject: `card:${cardId}`, phone, purpose: "3DS", payload: { merchantName, amount, currency } });
-    return { challengeId: r.challengeId };
+    return { challengeId: r.challengeId, devCode: r.devCode };
   },
   async verify(cardId, challengeId, code) {
     try {

@@ -57,6 +57,7 @@ export type AuthResponse = {
   availableBalance?: bigint;
   currency?: Currency;
   challengeId?: string;
+  devCode?: string; // DEV/DEMO only (console OTP provider)
   dispensed?: DispensePlan | null;
   miniStatement?: { date: Date; description: string; debit: bigint; credit: bigint }[];
 };
@@ -159,7 +160,7 @@ export async function authorize(req: AuthRequest): Promise<AuthResponse> {
       const row = existing ?? await prisma.cardAuthorization.create({ data: { ...base, rrn: await newRrn(prisma), status: "PENDING_3DS", responseCode: "1A", threeDsChallengeId: ch.challengeId } });
       if (existing) await prisma.cardAuthorization.update({ where: { id: row.id }, data: { threeDsChallengeId: ch.challengeId } });
       await prisma.cardAuthEvent.create({ data: { authorizationId: row.id, type: "CHALLENGE", amount: base.amount } });
-      return { ...respond(row), challengeId: ch.challengeId };
+      return { ...respond(row), challengeId: ch.challengeId, devCode: ch.devCode };
     }
     if (!existing || existing.threeDsChallengeId !== req.threeDs.challengeId || !(await getThreeDs().verify(card.id, req.threeDs.challengeId, req.threeDs.code))) {
       return decline("05", "3-D Secure authentication failed");

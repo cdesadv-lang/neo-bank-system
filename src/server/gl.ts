@@ -56,6 +56,7 @@ export const CHART_OF_ACCOUNTS: {
   { code: "5000", nameAr: "المصروفات", nameEn: "Expenses", type: "EXPENSE", allowManualPosting: false },
   { code: "5010", nameAr: "عوائد الودائع المدفوعة", nameEn: "Interest Expense on Deposits", type: "EXPENSE", parentCode: "5000" },
   { code: "5020", nameAr: "عجز وزيادة النقدية", nameEn: "Cash Over / Short", type: "EXPENSE", parentCode: "5000" },
+  { code: "5030", nameAr: "مصروفات تشغيلية", nameEn: "Operating Expenses", type: "EXPENSE", parentCode: "5000" },
 ];
 
 export function glForAccountType(t: "CURRENT" | "SAVINGS" | "TERM_DEPOSIT"): string {

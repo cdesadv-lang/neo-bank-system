@@ -14,5 +14,5 @@ export const POST = portalApi(async (req, { customer, params }) => {
   const sim = new PosSimulator(defaultSwitch(), { id: "MERDEMOWEB", name: b.merchantName, mcc: "5999", country: "EG" });
   const res = await sim.purchase({ cardToken: card.token, amount: toMinor(b.amount), currency: card.account.currency, mode: "ECOM", threeDs: b.threeDs, stan: b.stan });
   const extra = res.fields["48"] ? JSON.parse(res.fields["48"]) : {};
-  return { responseCode: res.fields["39"], rrn: res.fields["37"], challengeId: extra.challengeId, mock: true };
+  return { responseCode: res.fields["39"], rrn: res.fields["37"], challengeId: extra.challengeId, devCode: extra.devCode, mock: true };
 });

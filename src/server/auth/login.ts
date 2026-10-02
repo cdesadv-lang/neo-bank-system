@@ -70,7 +70,7 @@ export async function customerLoginStart(input: { username: string; password: st
     throw invalid();
   }
   const otp = await issueOtp({ subject: user.id, phone: user.customer.phone, purpose: "LOGIN" });
-  return { challengeId: otp.challengeId, expiresAt: otp.expiresAt, phoneHint: user.customer.phone.replace(/.(?=.{3})/g, "•") };
+  return { challengeId: otp.challengeId, expiresAt: otp.expiresAt, phoneHint: user.customer.phone.replace(/.(?=.{3})/g, "•"), devCode: otp.devCode };
 }
 
 /** Step 2: verify OTP, create session. */

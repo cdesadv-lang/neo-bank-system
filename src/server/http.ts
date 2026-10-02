@@ -49,7 +49,7 @@ export async function parseBody<T>(req: Request, schema: ZodType<T>): Promise<T>
 type Handler<C> = (req: Request, ctx: C) => Promise<unknown>;
 
 export function publicApi(fn: Handler<{ params: Record<string, string>; ip: string; ua: string }>) {
-  return async (req: Request, rc?: RouteCtx) => {
+  return async (req: Request, rc: RouteCtx) => {
     try {
       checkOrigin(req);
       const params = rc?.params ? await rc.params : {};
@@ -65,7 +65,7 @@ export type StaffCtx = { staff: StaffPrincipal; actor: Actor; params: Record<str
 
 /** Every staff API goes through here: session check + permission check, server-side. */
 export function staffApi(perm: Permission | null, fn: Handler<StaffCtx>) {
-  return async (req: Request, rc?: RouteCtx) => {
+  return async (req: Request, rc: RouteCtx) => {
     try {
       checkOrigin(req);
       const staff = await getStaffByToken(readCookie(req.headers.get("cookie"), STAFF_COOKIE));
@@ -86,7 +86,7 @@ export type PortalCtx = { customer: CustomerPrincipal; actor: Actor; params: Rec
 
 /** Every portal API: customer session required; all queries are then scoped to customer.customerId. */
 export function portalApi(fn: Handler<PortalCtx>) {
-  return async (req: Request, rc?: RouteCtx) => {
+  return async (req: Request, rc: RouteCtx) => {
     try {
       checkOrigin(req);
       const customer = await getCustomerByToken(readCookie(req.headers.get("cookie"), PORTAL_COOKIE));

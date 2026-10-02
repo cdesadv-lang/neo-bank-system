@@ -68,6 +68,8 @@ export async function changeOwnPassword(staff: StaffPrincipal, actor: Actor, raw
 }
 
 export async function totpSetup(staff: StaffPrincipal) {
+  const current = await prisma.staff.findUniqueOrThrow({ where: { id: staff.id } });
+  if (current.totpEnabled) throw new AppError("TOTP_ALREADY_ENABLED", 409, "Two-factor authentication is already enabled; disable it first with a valid code");
   const secret = generateTotpSecret();
   await prisma.staff.update({ where: { id: staff.id }, data: { totpSecret: secret, totpEnabled: false } });
   return { secret, otpauthUrl: otpauthUrl(secret, staff.username) };

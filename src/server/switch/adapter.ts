@@ -67,6 +67,7 @@ export async function handleIso(msg: IsoMessage): Promise<IsoMessage> {
   const extra: Record<string, unknown> = {};
   if (res.miniStatement) extra.miniStatement = res.miniStatement.map((l) => ({ d: l.date.toISOString().slice(0, 10), t: l.description, dr: l.debit.toString(), cr: l.credit.toString() }));
   if (res.challengeId) extra.challengeId = res.challengeId;
+  if (res.devCode) extra.devCode = res.devCode;
   if (res.dispensed) extra.dispensed = res.dispensed.map((p) => ({ pos: p.position, den: p.denomination.toString(), n: p.notes }));
   if (Object.keys(extra).length) out[DE.ADDITIONAL_DATA] = JSON.stringify(extra);
   return reply(msg, out);

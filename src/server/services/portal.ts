@@ -66,7 +66,7 @@ export async function startTransfer(c: CustomerPrincipal, raw: unknown) {
     toName = to.customer.nameEn.replace(/(\w)\w+/g, "$1***");
   } else if (!BANKS[bankCodeOf(input.toAccountNumber)]) throw new AppError("UNKNOWN_BANK", 422, "Unknown destination bank");
   const otp = await issueOtp({ subject: c.userId, phone: c.phone, purpose: "TRANSFER", payload: input });
-  return { challengeId: otp.challengeId, expiresAt: otp.expiresAt, preview: { from: from.accountNumber, to: input.toAccountNumber, toName, amount: input.amount, currency: from.currency } };
+  return { challengeId: otp.challengeId, devCode: otp.devCode, expiresAt: otp.expiresAt, preview: { from: from.accountNumber, to: input.toAccountNumber, toName, amount: input.amount, currency: from.currency } };
 }
 
 /** Step 2: OTP confirmation executes the transfer exactly once. */
@@ -122,7 +122,7 @@ export async function startBillPayment(c: CustomerPrincipal, raw: unknown) {
   if (amount > acc.balance) throw Errors.insufficientFunds();
   await checkDailyLimit(c.customerId, amount, "EGP");
   const otp = await issueOtp({ subject: c.userId, phone: c.phone, purpose: "BILL_PAYMENT", payload: { ...input, amount: minorToString(amount) } });
-  return { challengeId: otp.challengeId, amount: minorToString(amount) };
+  return { challengeId: otp.challengeId, devCode: otp.devCode, amount: minorToString(amount) };
 }
 
 export async function confirmBillPayment(c: CustomerPrincipal, actor: Actor, raw: unknown, postedAt?: Date) {
@@ -219,7 +219,7 @@ export async function startOnboarding(raw: unknown, ip: string) {
   const { password, ...rest } = input;
   const passwordHash = await hashPassword(password);
   const otp = await issueOtp({ subject: input.phone, phone: input.phone, purpose: "ONBOARDING", payload: { ...rest, passwordHash } });
-  return { challengeId: otp.challengeId, expiresAt: otp.expiresAt };
+  return { challengeId: otp.challengeId, devCode: otp.devCode, expiresAt: otp.expiresAt };
 }
 
 /** Verifies the mobile number, then creates a PENDING CIF + pending account + KYC approval request for staff. */

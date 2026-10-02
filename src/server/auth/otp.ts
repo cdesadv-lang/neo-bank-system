@@ -67,8 +67,11 @@ export async function issueOtp(opts: { subject: string; phone: string; purpose: 
       expiresAt: new Date(Date.now() + OTP_TTL_MS),
     },
   });
-  await getOtpProvider().send(opts.phone, code, opts.purpose);
-  return { challengeId: ch.id, expiresAt: ch.expiresAt };
+  const provider = getOtpProvider();
+  await provider.send(opts.phone, code, opts.purpose);
+  // DEMO convenience only: echo the code back to the UI in local development (never in production).
+  const devCode = provider.name === "console" && process.env.DEMO_SHOW_OTP === "1" && process.env.NODE_ENV !== "production" ? code : undefined;
+  return { challengeId: ch.id, expiresAt: ch.expiresAt, devCode };
 }
 
 /** Verifies and consumes a challenge atomically. Returns the stored payload. */

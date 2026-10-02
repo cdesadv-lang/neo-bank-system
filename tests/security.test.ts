@@ -27,6 +27,8 @@ beforeEach(async () => {
   alex = await makeBranch("0201");
 });
 
+const NOP = { params: Promise.resolve({}) };
+
 describe("RBAC", () => {
   it("every role has a defined permission set and only SUPER_ADMIN has all permissions", () => {
     for (const [role, perms] of Object.entries(ROLE_PERMISSIONS)) {
@@ -51,18 +53,18 @@ describe("RBAC", () => {
   });
 
   it("route handlers enforce authentication and permissions with real session cookies", async () => {
-    const unauth = await customersGET(new Request("http://localhost:3100/api/staff/customers"));
+    const unauth = await customersGET(new Request("http://localhost:3100/api/staff/customers"), NOP);
     expect(unauth.status).toBe(401);
     const teller = await makeStaff("TELLER", cairo.id);
     const { token } = await createStaffSession(teller.id);
-    const ok = await customersGET(new Request("http://localhost:3100/api/staff/customers", { headers: { cookie: `nb_staff=${token}` } }));
+    const ok = await customersGET(new Request("http://localhost:3100/api/staff/customers", { headers: { cookie: `nb_staff=${token}` } }), NOP);
     expect(ok.status).toBe(200);
-    const denied = await journalPOST(new Request("http://localhost:3100/api/staff/journals/manual", { method: "POST", headers: { cookie: `nb_staff=${token}`, "content-type": "application/json" }, body: "{}" }));
+    const denied = await journalPOST(new Request("http://localhost:3100/api/staff/journals/manual", { method: "POST", headers: { cookie: `nb_staff=${token}`, "content-type": "application/json" }, body: "{}" }), NOP);
     expect(denied.status).toBe(403);
     // CSRF: cross-origin write rejected
     const fin = await makeStaff("FINANCE", null);
     const s2 = await createStaffSession(fin.id);
-    const csrf = await journalPOST(new Request("http://localhost:3100/api/staff/journals/manual", { method: "POST", headers: { cookie: `nb_staff=${s2.token}`, origin: "https://evil.example", host: "localhost:3100" }, body: "{}" }));
+    const csrf = await journalPOST(new Request("http://localhost:3100/api/staff/journals/manual", { method: "POST", headers: { cookie: `nb_staff=${s2.token}`, origin: "https://evil.example", host: "localhost:3100" }, body: "{}" }), NOP);
     expect(csrf.status).toBe(403);
     expect((await csrf.json()).error.code).toBe("CSRF_REJECTED");
   });
