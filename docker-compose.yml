@@ -1,0 +1,84 @@
+# Production-style stack: PostgreSQL + app + Caddy (automatic HTTPS) + nightly EOD/backup.
+#   cp .env.example .env.production   # fill in real secrets
+#   docker compose --env-file .env.production up -d --build
+#   docker compose exec app npx tsx prisma/seed.ts     # DEMO ONLY — never seed a production bank
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: neobank
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: neobank
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neobank -d neobank"]
+      interval: 10s
+      retries: 10
+    networks: [internal]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://neobank:${POSTGRES_PASSWORD}@db:5432/neobank?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      APP_URL: ${APP_URL:-https://bank.example.com}
+      COOKIE_SECURE: "true"
+      OTP_PROVIDER: ${OTP_PROVIDER:-sms-webhook}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      SWITCH_API_KEY: ${SWITCH_API_KEY:?set SWITCH_API_KEY}
+      HSM_MOCK_ZPK: ${HSM_MOCK_ZPK:-}
+      HSM_MOCK_PVK: ${HSM_MOCK_PVK:-}
+      ALLOW_MOCK_HSM: ${ALLOW_MOCK_HSM:-0}
+    expose: ["3000"]
+    networks: [internal]
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:-bank.example.com}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks: [internal]
+
+  # Nightly EOD (23:30 Cairo) and backup (01:30). Uses the same image.
+  scheduler:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://neobank:${POSTGRES_PASSWORD}@db:5432/neobank?schema=public
+      SESSION_SECRET: ${SESSION_SECRET}
+      TZ: Africa/Cairo
+      BACKUP_DIR: /backups
+      HSM_MOCK_ZPK: ${HSM_MOCK_ZPK:-}
+      HSM_MOCK_PVK: ${HSM_MOCK_PVK:-}
+      ALLOW_MOCK_HSM: ${ALLOW_MOCK_HSM:-0}
+    volumes:
+      - backups:/backups
+    entrypoint: ["/usr/bin/tini", "--"]
+    command: >
+      sh -c 'while true; do
+        now=$$(date +%H%M);
+        if [ "$$now" = "2330" ]; then npx tsx scripts/run-eod.ts || true; sleep 61; fi;
+        if [ "$$now" = "0130" ]; then bash scripts/backup.sh || true; sleep 61; fi;
+        sleep 20; done'
+    networks: [internal]
+
+volumes:
+  pgdata:
+  caddy_data:
+  backups:
+
+networks:
+  internal:
