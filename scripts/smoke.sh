@@ -2,6 +2,8 @@
 # End-to-end smoke test against a running server with the demo seed loaded.
 #   COOKIE_SECURE=false ALLOW_CONSOLE_OTP=1 ALLOW_MOCK_HSM=1 SWITCH_API_KEY=... npx next start -p 3101 > /tmp/neobank-start.log 2>&1 &
 #   BASE=http://localhost:3101 SERVER_LOG=/tmp/neobank-start.log SWITCH_API_KEY=... scripts/smoke.sh
+# Note: logins are rate limited per IP (30 / 15 min) by design — running this script more than twice
+# within 15 minutes trips the limiter (HTTP 429).
 set -uo pipefail
 BASE="${BASE:-http://localhost:3101}"
 LOG="${SERVER_LOG:-/tmp/neobank-start.log}"
