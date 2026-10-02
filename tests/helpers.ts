@@ -92,3 +92,23 @@ export async function ledgerBalanceOfAccount(accountId: string): Promise<bigint>
   const r = await prisma.journalLine.aggregate({ where: { accountId }, _sum: { debit: true, credit: true } });
   return (r._sum.credit ?? 0n) - (r._sum.debit ?? 0n);
 }
+
+import type { StaffPrincipal } from "@/server/rbac";
+import type { Actor } from "@/server/audit";
+
+export function principal(s: { id: string; username: string; role: StaffRole; branchId: string | null; fullNameAr: string; fullNameEn: string }): StaffPrincipal {
+  return { id: s.id, username: s.username, role: s.role, branchId: s.branchId, fullNameAr: s.fullNameAr, fullNameEn: s.fullNameEn };
+}
+
+export function actorOf(p: StaffPrincipal): Actor {
+  return { type: "STAFF", id: p.id, name: p.username, ip: "127.0.0.1" };
+}
+
+export async function makeTill(branchId: string, kind: "VAULT" | "TELLER", assignedToId: string | null, currency: Currency = "EGP", open = true) {
+  n++;
+  return prisma.till.create({ data: { code: `TILL-${n}`, branchId, kind, currency, assignedToId, status: open ? "OPEN" : "CLOSED" } });
+}
+
+export async function fundTill(tillId: string, amount: bigint, currency: Currency = "EGP") {
+  return withTx((tx) => postJournal(tx, { idempotencyKey: `fund-till:${randomUUID()}`, type: "MANUAL", description: "fund till", currency, channel: "SYSTEM", lines: [{ glCode: "1100", credit: amount }, { tillId, debit: amount }] }));
+}
